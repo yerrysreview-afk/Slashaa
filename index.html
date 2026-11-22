@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8">
@@ -778,7 +777,9 @@
             }
             let myW = 0
               , oppW = 0
-              , matchDone = false;
+              , matchDone = false
+              , serW = 0
+              , serO = 0;
             function end(win, forfeit) {
                 if (phase === 'over')
                     return;
@@ -792,27 +793,48 @@
                     else
                         oppW++;
                     fin = !!forfeit || myW >= 2 || oppW >= 2;
-                    matchDone = fin
+                    matchDone = fin;
+                    if (fin && !forfeit) {
+                        if (myW > oppW)
+                            serW++;
+                        else
+                            serO++
+                    }
                 }
                 setTimeout( () => {
                     ov.className = '';
                     const title = fin ? (win ? 'VICTORY' : 'DEFEATED') : (win ? 'ROUND WON' : 'ROUND LOST');
                     const ql = fin ? `<p class="ql">“${endLine(win)}”</p>` : '';
-                    const sc = mode === 'online' ? `<p style="font-size:22px;font-weight:700;color:var(--ink);letter-spacing:.3em">${myW} – ${oppW}</p>` : '';
-                    ov.innerHTML = `<h1 class="${win ? '' : 'red'}" style="font-size:34px">${title}</h1>${sc}<p>Damage dealt ${Math.round(stats.dealt)}<br>Slashes ${stats.n}</p>${ql}<button class="p" id="rm">${fin ? 'Rematch' : 'Next round'}</button><button id="mn">Menu</button>`;
-                    $('#rm').onclick = () => {
-                        if (mode === 'practice')
-                            return countdown();
-                        me.rdy = round + 1;
-                        if (net)
-                            net.presence({
-                                rdy: round + 1
-                            });
-                        $('#rm').textContent = 'Waiting…';
-                        $('#rm').disabled = true;
-                        check()
+                    const sc = (mode === 'online' ? `<p style="font-size:22px;font-weight:700;color:var(--ink);letter-spacing:.3em">${myW} – ${oppW}</p>` : '') + (mode === 'online' && fin ? `<p style="font-size:11px">Matches won<br><span style="color:var(--ink);font-size:18px;font-weight:700;letter-spacing:.3em">${serW} – ${serO}</span></p>` : '');
+                    ov.innerHTML = `<h1 class="${win ? '' : 'red'}" style="font-size:34px">${title}</h1>${sc}<p>Damage dealt ${Math.round(stats.dealt)}<br>Slashes ${stats.n}</p>${ql}${fin ? '<button class="p" id="rm">Rematch</button>' : '<p id="nx">Next round starting…</p>'}<button id="mn">Menu</button>`;
+                    if ($('#rm'))
+                        $('#rm').onclick = () => {
+                            if (mode === 'practice')
+                                return countdown();
+                            me.rdy = round + 1;
+                            if (net)
+                                net.presence({
+                                    rdy: round + 1
+                                });
+                            $('#rm').textContent = 'Waiting…';
+                            $('#rm').disabled = true;
+                            check()
+                        }
+                        ;
+                    if (!fin && mode === 'online') {
+                        const tok = round;
+                        setTimeout( () => {
+                            if (phase === 'over' && round === tok && !matchDone) {
+                                me.rdy = round + 1;
+                                if (net)
+                                    net.presence({
+                                        rdy: round + 1
+                                    });
+                                check()
+                            }
+                        }
+                        , 2400)
                     }
-                    ;
                     $('#mn').onclick = () => {
                         toMenu()
                     }
@@ -850,6 +872,7 @@
                 mode = '';
                 round = 0;
                 myW = oppW = 0;
+                serW = serO = 0;
                 matchDone = false;
                 oppRdy = 0;
                 ptr = null;
