@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8">
@@ -925,13 +926,77 @@
                     rdy: 1
                 }
                   , presTimer = null;
+                const ICE = {
+                    iceServers: [{
+                        urls: 'stun:stun.l.google.com:19302'
+                    }, {
+                        urls: 'stun:stun1.l.google.com:19302'
+                    }, {
+                        urls: 'stun:global.stun.twilio.com:3478'
+                    }, {
+                        urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'],
+                        username: 'peerjs',
+                        credential: 'peerjsp'
+                    }, {
+                        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp', 'turns:openrelay.metered.ca:443?transport=tcp'],
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
+                    }]
+                };
+                const FAILMSG = 'Could not connect. Your network may block direct play. Try Wi-Fi on both phones.';
+                const vis = () => {
+                    if (document.visibilityState === 'visible' && peer && peer.disconnected && !peer.destroyed) {
+                        try {
+                            peer.reconnect()
+                        } catch (e) {}
+                    }
+                }
+                ;
+                document.addEventListener('visibilitychange', vis);
 
                 function onConnected(c, remoteId) {
                     conn = c;
                     oppId = remoteId;
-                    status('Connected!');
+                    status('Connecting…');
+                    let to = null;
+                    if (!c.open) {
+                        to = setTimeout( () => {
+                            if (!c.open) {
+                                status(FAILMSG);
+                                c._dead = true;
+                                try {
+                                    c.close()
+                                } catch (e) {}
+                                if (conn === c) {
+                                    conn = null;
+                                    oppId = null
+                                }
+                            }
+                        }
+                        , 15000);
+                        try {
+                            c.on('iceStateChanged', st => {
+                                if (st === 'failed' && !c.open) {
+                                    clearTimeout(to);
+                                    status(FAILMSG);
+                                    c._dead = true;
+                                    try {
+                                        c.close()
+                                    } catch (e) {}
+                                    if (conn === c) {
+                                        conn = null;
+                                        oppId = null
+                                    }
+                                }
+                            }
+                            )
+                        } catch (e) {}
+                    }
                     // Always wait for the data channel to be fully open before sending
                     const go = () => {
+                        if (to)
+                            clearTimeout(to);
+                        status('Connected!');
                         me.rdy = 1;
                         net.presence({
                             hp: HP,
@@ -1001,6 +1066,8 @@
                     }
                     );
                     c.on('close', () => {
+                        if (c._dead)
+                            return;
                         if (phase === 'fight' || phase === 'count')
                             end(true, true);
                         else if (phase === 'wait') {
@@ -1065,6 +1132,7 @@
                             if (conn)
                                 conn.close()
                         } catch (e) {}
+                        document.removeEventListener('visibilitychange', vis);
                         try {
                             if (peer)
                                 peer.destroy()
@@ -1075,8 +1143,16 @@
 
                 // Try to become host first
                 peer = new Peer(roomId,{
-                    debug: 0
+                    debug: 0,
+                    config: ICE
                 });
+                peer.on('disconnected', () => {
+                    try {
+                        if (peer && !peer.destroyed)
+                            peer.reconnect()
+                    } catch (e) {}
+                }
+                );
                 peer.on('open', id => {
                     myId = id;
                     oppId = null;
@@ -1101,19 +1177,61 @@
                             peer.destroy()
                         } catch (e) {}
                         peer = new Peer({
-                            debug: 0
+                            debug: 0,
+                            config: ICE
                         });
+                        peer.on('disconnected', () => {
+                            try {
+                                if (peer && !peer.destroyed)
+                                    peer.reconnect()
+                            } catch (e) {}
+                        }
+                        );
                         peer.on('open', id => {
                             myId = id;
                             status('Joining…');
                             const c = peer.connect(roomId, {
                                 reliable: true
                             });
-                            c.on('open', () => onConnected(c, roomId));
-                            c.on('error', () => status('Could not reach host'));
+                            const to = setTimeout( () => {
+                                if (!c.open) {
+                                    status(FAILMSG);
+                                    c._dead = true;
+                                    try {
+                                        c.close()
+                                    } catch (e) {}
+                                }
+                            }
+                            , 15000);
+                            c.on('open', () => {
+                                clearTimeout(to);
+                                onConnected(c, roomId)
+                            }
+                            );
+                            c.on('error', () => {
+                                clearTimeout(to);
+                                status('Could not reach host')
+                            }
+                            );
+                            try {
+                                c.on('iceStateChanged', st => {
+                                    if (st === 'failed' && !c.open) {
+                                        clearTimeout(to);
+                                        status(FAILMSG);
+                                        c._dead = true;
+                                        try {
+                                            c.close()
+                                        } catch (e) {}
+                                    }
+                                }
+                                )
+                            } catch (e) {}
                         }
                         );
-                        peer.on('error', () => status('Connection failed'));
+                        peer.on('error', e => {
+                            status(e && e.type === 'peer-unavailable' ? 'Host not found. Ask for a new link.' : 'Connection failed')
+                        }
+                        );
                     } else if (err.type !== 'peer-unavailable') {
                         status('Network error — try again');
                     }
